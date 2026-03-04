@@ -1,0 +1,214 @@
+package com.helpdesk.service;
+
+import com.helpdesk.dao.TicketDAO;
+import com.helpdesk.dao.UserDAO;
+import com.helpdesk.enums.Priority;
+import com.helpdesk.enums.TicketStatus;
+import com.helpdesk.model.AuditLog;
+import com.helpdesk.model.Ticket;
+import com.helpdesk.model.User;
+import java.util.List;
+import org.hibernate.Session;
+import org.hibernate.SessionFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * TicketService is the ONLY place allowed to mutate ticket state.
+ * Controllers delegate here; DAOs are never called directly from controllers.
+ */
+@Service
+@Transactional
+public class TicketService {
+
+    private final TicketDAO ticketDAO;
+    private final UserDAO userDAO;
+    private final SessionFactory sessionFactory;
+
+    @Autowired
+    public TicketService(
+        TicketDAO ticketDAO,
+        UserDAO userDAO,
+        SessionFactory sessionFactory
+    ) {
+        this.ticketDAO = ticketDAO;
+        this.userDAO = userDAO;
+        this.sessionFactory = sessionFactory;
+    }
+
+    // -----------------------------------------------------------------------
+    // Read
+    // -----------------------------------------------------------------------
+
+    @Transactional(readOnly = true)
+    public List<Ticket> getAllTickets() {
+        return ticketDAO.findAll();
+    }
+
+    @Transactional(readOnly = true)
+    public Ticket getTicketById(Long id) {
+        return ticketDAO
+            .findById(id)
+            .orElseThrow(() ->
+                new IllegalArgumentException("Ticket not found: " + id)
+            );
+    }
+
+    // -----------------------------------------------------------------------
+    // Create
+    // -----------------------------------------------------------------------
+
+    public Ticket createTicket(
+        String title,
+        String description,
+        Priority priority,
+        Long reporterId
+    ) {
+        User reporter = userDAO
+            .findById(reporterId)
+            .orElseThrow(() ->
+                new IllegalArgumentException(
+                    "Reporter not found: " + reporterId
+                )
+            );
+
+        // Ticket(title, description, priority, createdBy) constructor — from Ticket.java
+        Ticket ticket = new Ticket(title, description, priority, reporter);
+        ticket.setStatus(TicketStatus.OPEN);
+
+        ticketDAO.save(ticket);
+
+        // AuditLog is immutable — use constructor, not setters
+        appendAudit(
+            ticket,
+            reporter,
+            "CREATED",
+            null,
+            "Ticket created with priority " + priority
+        );
+
+        return ticket;
+    }
+
+    // -----------------------------------------------------------------------
+    // State transitions — OPEN → IN_PROGRESS → CLOSED only
+    // -----------------------------------------------------------------------
+
+    public Ticket startProgress(Long ticketId, Long assigneeId) {
+        Ticket ticket = getTicketById(ticketId);
+        assertStatus(ticket, TicketStatus.OPEN, "start progress on");
+
+        User assignee = userDAO
+            .findById(assigneeId)
+            .orElseThrow(() ->
+                new IllegalArgumentException(
+                    "Assignee not found: " + assigneeId
+                )
+            );
+
+        // Use the domain method — sets assignedTo + status in one call
+        ticket.assignTo(assignee);
+
+        ticketDAO.save(ticket);
+        appendAudit(ticket, assignee, "STATUS_CHANGE", "OPEN", "IN_PROGRESS");
+
+        return ticket;
+    }
+
+    public Ticket closeTicket(Long ticketId, Long closedByUserId) {
+        Ticket ticket = getTicketById(ticketId);
+        assertStatus(ticket, TicketStatus.IN_PROGRESS, "close");
+
+        User closedBy = userDAO
+            .findById(closedByUserId)
+            .orElseThrow(() ->
+                new IllegalArgumentException(
+                    "User not found: " + closedByUserId
+                )
+            );
+
+        // Use the domain method — sets status + resolvedAt
+        ticket.close();
+
+        ticketDAO.save(ticket);
+        appendAudit(ticket, closedBy, "STATUS_CHANGE", "IN_PROGRESS", "CLOSED");
+
+        return ticket;
+    }
+
+    // -----------------------------------------------------------------------
+    // Priority update
+    // -----------------------------------------------------------------------
+
+    public Ticket updatePriority(
+        Long ticketId,
+        Priority newPriority,
+        Long updatedByUserId
+    ) {
+        Ticket ticket = getTicketById(ticketId);
+
+        if (ticket.getStatus() == TicketStatus.CLOSED) {
+            throw new IllegalStateException(
+                "Cannot change priority of a CLOSED ticket."
+            );
+        }
+
+        User updatedBy = userDAO
+            .findById(updatedByUserId)
+            .orElseThrow(() ->
+                new IllegalArgumentException(
+                    "User not found: " + updatedByUserId
+                )
+            );
+
+        String oldPriority = ticket.getPriority().name();
+        ticket.setPriority(newPriority);
+
+        ticketDAO.save(ticket);
+        appendAudit(
+            ticket,
+            updatedBy,
+            "PRIORITY_CHANGE",
+            oldPriority,
+            newPriority.name()
+        );
+
+        return ticket;
+    }
+
+    // -----------------------------------------------------------------------
+    // Internal helpers
+    // -----------------------------------------------------------------------
+
+    private void assertStatus(
+        Ticket ticket,
+        TicketStatus required,
+        String action
+    ) {
+        if (ticket.getStatus() != required) {
+            throw new IllegalStateException(
+                String.format(
+                    "Cannot %s ticket #%d — expected status %s but was %s.",
+                    action,
+                    ticket.getId(),
+                    required,
+                    ticket.getStatus()
+                )
+            );
+        }
+    }
+
+    private void appendAudit(
+        Ticket ticket,
+        User actor,
+        String action,
+        String oldValue,
+        String newValue
+    ) {
+        // AuditLog has no setters — use the (ticket, actor, action, oldValue, newValue) constructor
+        AuditLog log = new AuditLog(ticket, actor, action, oldValue, newValue);
+        Session session = sessionFactory.getCurrentSession();
+        session.save(log);
+    }
+}
