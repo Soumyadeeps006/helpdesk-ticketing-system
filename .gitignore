@@ -1,0 +1,53 @@
+# ─── Build output ────────────────────────────────────────────────────────────
+target/
+*.war
+*.jar
+*.class
+
+# ─── Maven ───────────────────────────────────────────────────────────────────
+.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.properties
+
+# ─── IDE — IntelliJ IDEA ─────────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# ─── IDE — Eclipse / STS ─────────────────────────────────────────────────────
+.classpath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# ─── IDE — VS Code ───────────────────────────────────────────────────────────
+.vscode/
+
+# ─── IDE — NetBeans ──────────────────────────────────────────────────────────
+nbproject/
+nbbuild/
+nbdist/
+nb-configuration.xml
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── OS artefacts ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Local environment / secrets ─────────────────────────────────────────────
+# Never commit real credentials — override hibernate.cfg.xml locally
+local.properties
+*.env
+
+# ─── Tomcat (if running embedded or from project root) ───────────────────────
+work/
+temp/
+
+# ─── Test reports ────────────────────────────────────────────────────────────
+surefire-reports/
+failsafe-reports/
