@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<beans
+    xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:context="http://www.springframework.org/schema/context"
+    xmlns:tx="http://www.springframework.org/schema/tx"
+    xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://www.springframework.org/schema/context
+           http://www.springframework.org/schema/context/spring-context.xsd
+           http://www.springframework.org/schema/tx
+           http://www.springframework.org/schema/tx/spring-tx.xsd"
+>
+
+    <!-- =====================================================
+         Component Scan — service, dao, config packages
+         (controllers are scanned by the DispatcherServlet)
+         ===================================================== -->
+    <context:component-scan
+        base-package="com.helpdesk.service, com.helpdesk.dao, com.helpdesk.config"
+    />
+
+    <!-- =====================================================
+         DataSource — MySQL via c3p0 connection pool
+         Override with -Ddb.url etc. for different environments
+         ===================================================== -->
+    <bean
+        id="dataSource"
+        class="com.mchange.v2.c3p0.ComboPooledDataSource"
+        destroy-method="close"
+    >
+        <property name="driverClass" value="com.mysql.cj.jdbc.Driver" />
+        <property
+            name="jdbcUrl"
+            value="jdbc:mysql://localhost:3306/helpdesk_db?useSSL=false&amp;serverTimezone=UTC"
+        />
+        <property name="user" value="helpdesk_user" />
+        <property name="password" value="helpdesk_pass" />
+        <!-- Pool sizing -->
+        <property name="initialPoolSize" value="5" />
+        <property name="minPoolSize" value="5" />
+        <property name="maxPoolSize" value="20" />
+        <property name="acquireIncrement" value="5" />
+        <!-- Connection health -->
+        <property name="maxIdleTime" value="1800" />
+        <property name="testConnectionOnCheckout" value="true" />
+    </bean>
+
+    <!-- =====================================================
+         Hibernate SessionFactory
+         ===================================================== -->
+    <bean
+        id="sessionFactory"
+        class="org.springframework.orm.hibernate5.LocalSessionFactoryBean"
+    >
+        <property name="dataSource" ref="dataSource" />
+        <!-- Auto-discover all @Entity classes under com.helpdesk.model -->
+        <property name="packagesToScan" value="com.helpdesk.model" />
+        <property name="hibernateProperties">
+            <props>
+                <prop
+                    key="hibernate.dialect"
+                >org.hibernate.dialect.MySQL8Dialect</prop>
+                <prop
+                    key="hibernate.hbm2ddl.auto"
+                >update</prop>  <!-- use 'validate' in prod -->
+                <prop key="hibernate.show_sql">true</prop>
+                <prop key="hibernate.format_sql">true</prop>
+                <prop key="hibernate.use_sql_comments">true</prop>
+                <!-- c3p0 is configured on the DataSource bean above -->
+                <prop key="hibernate.connection.provider_class">
+                    org.hibernate.c3p0.internal.C3P0ConnectionProvider
+                </prop>
+                <!-- Batch fetching to mitigate N+1 on comment trees -->
+                <prop key="hibernate.default_batch_fetch_size">16</prop>
+                <!-- Second-level cache disabled for simplicity -->
+                <prop key="hibernate.cache.use_second_level_cache">false</prop>
+            </props>
+        </property>
+    </bean>
+
+    <!-- =====================================================
+         Transaction Manager
+         ===================================================== -->
+    <bean
+        id="transactionManager"
+        class="org.springframework.orm.hibernate5.HibernateTransactionManager"
+    >
+        <property name="sessionFactory" ref="sessionFactory" />
+    </bean>
+
+    <!-- Enable @Transactional annotations -->
+    <tx:annotation-driven transaction-manager="transactionManager" />
+
+</beans>

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE hibernate-configuration PUBLIC
+    "-//Hibernate/Hibernate Configuration DTD 3.0//EN"
+    "http://hibernate.sourceforge.net/hibernate-configuration-3.0.dtd">
+<!--
+    hibernate.cfg.xml
+    -----------------
+    Hibernate configuration used when running outside of Spring
+    (e.g. standalone utilities, DB migration scripts).
+    The canonical sessionFactory bean is defined in applicationContext.xml
+    for all Spring-managed contexts.
+-->
+<hibernate-configuration>
+    <session-factory>
+
+        <!-- ========== Database Connection ========== -->
+        <property
+            name="connection.driver_class"
+        >com.mysql.cj.jdbc.Driver</property>
+        <property
+            name="connection.url"
+        >jdbc:mysql://localhost:3306/helpdesk_db?useSSL=false&amp;serverTimezone=UTC</property>
+        <property name="connection.username">helpdesk_user</property>
+        <property name="connection.password">helpdesk_pass</property>
+
+        <!-- ========== Dialect ========== -->
+        <property name="dialect">org.hibernate.dialect.MySQL8Dialect</property>
+
+        <!-- ========== c3p0 Connection Pool ========== -->
+        <property name="connection.provider_class">
+            org.hibernate.c3p0.internal.C3P0ConnectionProvider
+        </property>
+        <property name="c3p0.min_size">5</property>
+        <property name="c3p0.max_size">20</property>
+        <property name="c3p0.acquire_increment">5</property>
+        <property name="c3p0.timeout">1800</property>
+        <property name="c3p0.max_statements">50</property>
+
+        <!-- ========== Schema Management ========== -->
+        <!-- 'update' = auto-create/update tables; use 'validate' in production -->
+        <property name="hbm2ddl.auto">update</property>
+
+        <!-- ========== SQL Logging ========== -->
+        <property name="show_sql">true</property>
+        <property name="format_sql">true</property>
+        <property name="use_sql_comments">true</property>
+
+        <!-- ========== Batch Fetching ========== -->
+        <!-- Reduces N+1 selects when loading comment trees -->
+        <property name="default_batch_fetch_size">16</property>
+
+        <!-- ========== Entity Mappings ========== -->
+        <!-- Hibernate discovers these via @Entity; listed here for explicitness -->
+        <mapping class="com.helpdesk.model.User" />
+        <mapping class="com.helpdesk.model.Ticket" />
+        <mapping class="com.helpdesk.model.Comment" />
+        <mapping class="com.helpdesk.model.AuditLog" />
+
+    </session-factory>
+</hibernate-configuration>
