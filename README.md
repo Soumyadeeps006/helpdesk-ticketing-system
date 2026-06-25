@@ -1,6 +1,8 @@
 # IT Help Desk Ticketing System
 
-A full-stack Java web application for managing IT support tickets, built with **Spring MVC**, **Hibernate ORM**, **J2EE Servlets**, **JSP/JSTL**, and **MySQL**.
+A modern, full-stack REST API for managing IT support tickets, built with **Spring Boot 3**, **Spring Data JPA**, **RabbitMQ**, and **PostgreSQL**. 
+
+This system provides a robust backend for ticket lifecycle management, complete with asynchronous notifications, file attachments, and strict timezone handling.
 
 ---
 
@@ -13,20 +15,21 @@ A full-stack Java web application for managing IT support tickets, built with **
 5. [Database Schema](#database-schema)
 6. [API Route Reference](#api-route-reference)
 7. [Running Tests](#running-tests)
-8. [WAR Packaging & Deployment](#war-packaging--deployment)
-9. [Known Limitations](#known-limitations)
+8. [Packaging & Deployment](#packaging--deployment)
+9. [Known Limitations & Future Work](#known-limitations--future-work)
 
 ---
 
 ## Features
 
-- Create, view, assign, and resolve support tickets
-- Priority levels: `LOW` / `MEDIUM` / `HIGH` / `CRITICAL`
-- Ticket lifecycle: `OPEN → IN_PROGRESS → CLOSED` with state-guard enforcement
-- Threaded comments with unlimited nesting (self-referencing tree)
-- Immutable audit trail — every write operation is logged with actor and timestamp
-- Background notification and audit servlets (J2EE lifecycle)
-- Bootstrap 5 responsive UI with a timeline view for the audit log
+- **RESTful API**: Complete CRUD and state-transition endpoints for tickets.
+- **Ticket Lifecycle**: Strict state-guard enforcement (`OPEN → IN_PROGRESS → CLOSED`).
+- **Priority Management**: `LOW` / `MEDIUM` / `HIGH` / `CRITICAL` with audit logging on changes.
+- **Async Notifications**: Decoupled event publishing via **RabbitMQ** (messages are only sent *after* the database transaction successfully commits).
+- **File Attachments**: Upload screenshots and logs to tickets, stored locally (easily swappable to AWS S3/MinIO).
+- **Strict Timezone Handling**: All timestamps are stored in the database as `TIMESTAMP WITH TIME ZONE` and serialized to UTC in JSON responses.
+- **Immutable Audit Trail**: Every state change, priority update, or creation is logged with the actor and timestamp.
+- **Zero-Install Build**: Includes the **Maven Wrapper** (`mvnw`) so developers don't need to install Maven globally.
 
 ---
 
@@ -34,24 +37,22 @@ A full-stack Java web application for managing IT support tickets, built with **
 
 | Layer | Technology |
 |---|---|
-| Build | Maven 3.9+ |
-| Language | Java 17 |
-| Web framework | Spring MVC 6 |
-| ORM | Hibernate 6 / Jakarta Persistence |
-| Servlets | Jakarta Servlet 5 (Tomcat 10) |
-| View | JSP 3 + JSTL 3 |
-| Database (prod) | MySQL 8 |
-| Database (test) | H2 (in-memory) |
-| Frontend | Bootstrap 5.3 |
+| Build | Maven 3.9+ (via Maven Wrapper) |
+| Language | Java 21 |
+| Framework | Spring Boot 3.4+ |
+| ORM | Spring Data JPA / Hibernate 6 |
+| Messaging | RabbitMQ (Spring AMQP) |
+| Database | PostgreSQL 15+ |
+| Validation | Jakarta Validation (Hibernate Validator) |
+| Testing | JUnit 5, Spring Boot Test, H2 (in-memory) |
 
 ---
 
 ## Prerequisites
 
-- JDK 17+
-- Maven 3.9+
-- MySQL 8 (for production use)
-- Apache Tomcat 10.1 (for deployment)
+- **JDK 21+**
+- **PostgreSQL 15+**
+- **RabbitMQ** (Can be run locally via Docker: `docker run -d -p 5672:5672 -p 15672:15672 rabbitmq:3-management`)
 
 ---
 
@@ -60,18 +61,17 @@ A full-stack Java web application for managing IT support tickets, built with **
 ### 1. Clone the repository
 
 ```bash
-    git clone https://github.com/Soumyadeeps006/helpdesk-ticketing-system.git
-    cd helpdesk-ticketing-system
+git clone https://github.com/Soumyadeeps006/helpdesk-ticketing-system.git
+cd helpdesk-ticketing-system
 ```
 
 ### 2. Configure the database
 
-Create a MySQL database and user:
+Create a PostgreSQL database:
 
 ```sql
-    CREATE DATABASE helpdesk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-    CREATE USER 'helpdesk'@'localhost' IDENTIFIED BY 'changeme';
-    GRANT ALL PRIVILEGES ON helpdesk.* TO 'helpdesk'@'localhost';
+    CREATE DATABASE helpdesk_db;
+    -- Default credentials in application.yml are postgres/postgres
 ```
 
 Apply the schema:
@@ -80,65 +80,71 @@ Apply the schema:
     mysql -u helpdesk -p helpdesk < src/main/resources/schema.sql
 ```
 
-### 3. Update Hibernate configuration
+### 3. Configure the application
 
-Edit `src/main/resources/hibernate.cfg.xml` and set your credentials:
+The application uses application.yml for configuration. By default, it connects to a local PostgreSQL database and RabbitMQ instance.
+To override settings for local development, create an application-dev.yml in src/main/resources/ or pass them as environment variables.
 
-```xml
-    <property name="hibernate.connection.url">
-        jdbc:mysql://localhost:3306/helpdesk?useSSL=false&amp;serverTimezone=UTC
-    </property>
-    <property name="hibernate.connection.username">helpdesk</property>
-    <property name="hibernate.connection.password">changeme</property>
-```
+### 4. Build and run
 
-### 4. Build and deploy
+Thanks to the Maven Wrapper, you do not need Maven installed on your system.
 
 ```bash
-    mvn clean package
-    cp target/helpdesk.war $CATALINA_HOME/webapps/
-    $CATALINA_HOME/bin/startup.sh
+    # Linux / macOS
+    ./mvnw spring-boot:run
+
+    # Windows
+    mvnw.cmd spring-boot:run
 ```
 
-Open `http://localhost:8080/helpdesk/` in your browser.
+The API will be available at http://localhost:8080/api/tickets.
 
 ---
 
 ## Database Schema
 
-```
-    users
-    id          BIGINT PK AUTO_INCREMENT
-    username    VARCHAR(100) UNIQUE NOT NULL
-    email       VARCHAR(255) UNIQUE NOT NULL
+Hibernate automatically manages the schema via ddl-auto: update in the dev profile. The core tables are:
 
-    tickets
-    id              BIGINT PK AUTO_INCREMENT
-    title           VARCHAR(255) NOT NULL
-    description     TEXT
-    status          ENUM('OPEN','IN_PROGRESS','CLOSED') NOT NULL DEFAULT 'OPEN'
-    priority        ENUM('LOW','MEDIUM','HIGH','CRITICAL') NOT NULL
-    reporter_id     BIGINT FK → users.id
-    assignee_id     BIGINT FK → users.id (nullable)
-    resolution_note TEXT
-    created_at      DATETIME NOT NULL
-    updated_at      DATETIME NOT NULL
+```sql
+    -- Users (Simplified for this context)
+    CREATE TABLE users (
+        id BIGSERIAL PRIMARY KEY,
+        username VARCHAR(100) UNIQUE NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL
+    );
 
-    comments
-    id          BIGINT PK AUTO_INCREMENT
-    ticket_id   BIGINT FK → tickets.id NOT NULL
-    author_id   BIGINT FK → users.id NOT NULL
-    parent_id   BIGINT FK → comments.id (nullable — NULL for root comments)
-    body        TEXT NOT NULL
-    created_at  DATETIME NOT NULL
+    -- Tickets
+    CREATE TABLE tickets (
+        id BIGSERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        status VARCHAR(20) NOT NULL DEFAULT 'OPEN', -- OPEN, IN_PROGRESS, RESOLVED, CLOSED
+        priority VARCHAR(20) NOT NULL DEFAULT 'MEDIUM', -- LOW, MEDIUM, HIGH, CRITICAL
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+    );
 
-    audit_logs
-    id          BIGINT PK AUTO_INCREMENT
-    ticket_id   BIGINT FK → tickets.id NOT NULL
-    actor_id    BIGINT FK → users.id NOT NULL
-    action      VARCHAR(100) NOT NULL
-    detail      TEXT
-    created_at  DATETIME NOT NULL
+    -- Attachments
+    CREATE TABLE attachments (
+        id BIGSERIAL PRIMARY KEY,
+        ticket_id BIGINT REFERENCES tickets(id) ON DELETE CASCADE,
+        original_filename VARCHAR(255) NOT NULL,
+        stored_filename VARCHAR(255) UNIQUE NOT NULL,
+        content_type VARCHAR(100),
+        file_size BIGINT,
+        file_path VARCHAR(500) NOT NULL
+    );
+
+    -- Audit Logs
+    CREATE TABLE audit_logs (
+        id BIGSERIAL PRIMARY KEY,
+        ticket_id BIGINT REFERENCES tickets(id) ON DELETE CASCADE,
+        actor_id BIGINT REFERENCES users(id),
+        action VARCHAR(100) NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
 ```
 
 ---
@@ -149,13 +155,12 @@ Open `http://localhost:8080/helpdesk/` in your browser.
 
 | Method | URL | Description |
 |---|---|---|
-| `GET` | `/tickets` | List all tickets |
-| `GET` | `/tickets/{id}` | Ticket detail view |
-| `GET` | `/tickets/new` | New-ticket form |
-| `POST` | `/tickets/create` | Submit new ticket |
-| `POST` | `/tickets/{id}/assign` | Assign ticket to agent |
-| `POST` | `/tickets/{id}/progress` | Move ticket to IN_PROGRESS |
-| `POST` | `/tickets/{id}/close` | Close ticket with resolution note |
+| `GET` | `api/tickets` | List all tickets |
+| `GET` | `api/tickets/{id}` | Get ticket details by ID |
+| `POST` | `api/tickets/new` | Create a new ticket (Triggers RabbitMQ event) |
+| `PUT` | `api/tickets/{id}/start` | Move ticket to IN_PROGRESS and assign |
+| `PUT` | `api/tickets/{id}/close` | Close the ticket |
+| `PUT` | `api/tickets/{id}/priority` | Update ticket priority |
 
 ### Comment routes (Spring MVC `CommentController`)
 
@@ -178,56 +183,51 @@ Open `http://localhost:8080/helpdesk/` in your browser.
 |---|---|---|
 | `GET` | `/tickets/{id}/timeline` | Rendered audit timeline (JSP) |
 
+### Attachment Endpoints (AttachmentController)
+| Method | URL | Description |
+|---|---|---|
+| `POST` | `/api/tickets/{ticketId}/attachments` | Upload a file to a specific ticket |
+
+Note: RabbitMQ events are published asynchronously on ticket creation, status changes, and priority updates using the routing key pattern ticket.event.#.
+
 ---
 
 ## Running Tests
 
-### Unit tests (H2 in-memory, no Tomcat needed)
+Run the unit and integration tests using the Maven Wrapper:
 
 ```bash
-    mvn test
+    # Linux / macOS
+    ./mvnw test
+
+    # Windows
+    mvnw.cmd test
 ```
 
-17 unit tests across `TicketServiceTest` (9) and `CommentDAOTest` (8).
+The test suite uses an in-memory H2 database and mocks RabbitMQ to ensure fast, isolated testing without requiring external services.
 
-### Integration tests (Day 5)
+## Packaging & Deployment
+
+To build a production-ready executable JAR:
 
 ```bash
-    mvn verify -P integration-tests
+    ./mvnw clean package -DskipTests
 ```
 
-| Test class | Coverage |
-|---|---|
-| `TicketWorkflowIT` | Full lifecycle: OPEN → IN_PROGRESS → CLOSED |
-| `AuditTrailIT` | Every service write produces a correct AuditLog entry |
-| `CommentTreeIT` | Parent/child tree via `findTreeByTicketId` JOIN FETCH |
+The artifact will be generated at target/helpdesk-ticketing-system-0.0.1-SNAPSHOT.jar.
 
----
-
-## WAR Packaging & Deployment
+Run it in production:
 
 ```bash
-    # Build the WAR
-    mvn clean package
-
-    # The artifact is at:
-    target/helpdesk.war
-
-    # Deploy to Tomcat 10 (hot-deploy)
-    cp target/helpdesk.war $CATALINA_HOME/webapps/
-
-    # Smoke-test key routes
-    curl -I http://localhost:8080/helpdesk/tickets
-    curl -I http://localhost:8080/helpdesk/tickets/new
+    java -jar target/helpdesk-ticketing-system-0.0.1-SNAPSHOT.jar \
+     --spring.datasource.url=jdbc:postgresql://prod-db:5432/helpdesk \
+     --spring.rabbitmq.host=prod-rabbitmq
 ```
-
 ---
 
 ## Known Limitations
 
-- **No authentication or authorisation** — any user can perform any action. Integrate Spring Security for production use.
-- **No pagination** — the `/tickets` list fetches all rows. Add server-side pagination for large datasets.
-- **Email notifications are fire-and-forget** — `NotificationServlet` logs but does not retry on failure. Consider a proper message queue (e.g., RabbitMQ) for reliability.
-- **H2 dialect differences** — some MySQL-specific DDL (e.g., `ENUM` columns) is shimmed for H2 in tests. Always verify migrations against the real MySQL schema before deploying.
-- **No file attachments** — tickets cannot have attached screenshots or logs. A future iteration could integrate S3 or a local file store.
-- **Timestamps are server-local** — no timezone conversion is applied in the UI. Consider storing UTC and converting in the JSP layer with `fmt:timeZone`.
+* Authentication & Authorization: Currently, there is no security context. Any user ID can be passed in the API. Future: Integrate Spring Security with JWT or OAuth2.
+* Local File Storage: Files are currently saved to the local ./uploads directory. Future: Implement an S3StorageService that implements the same interface as LocalStorageService to upload directly to AWS S3 or MinIO.
+* Pagination in Controllers: While TicketService supports pagination (getTicketsPage), the TicketController currently returns all tickets. Future: Add Pageable parameters to the REST endpoints.
+* RabbitMQ Dead Letter Queues: If the notification listener fails, the message is currently lost. Future: Configure a Dead Letter Exchange (DLX) to handle and retry failed notifications.
