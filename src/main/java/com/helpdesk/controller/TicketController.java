@@ -32,10 +32,17 @@ public class TicketController {
     // GET /tickets  → list all tickets
     // ------------------------------------------------------------------
     @GetMapping
-    public ModelAndView listTickets() {
-        List<Ticket> tickets = ticketService.getAllTickets();
+    public ModelAndView listTickets(@RequestParam(defaultValue = "0") int page,
+                                   @RequestParam(defaultValue = "10") int size) {
+        List<Ticket> tickets = ticketService.getTicketsPage(page, size);
+        long totalCount = ticketService.getTicketCount();
+        int totalPages = (int) Math.ceil((double) totalCount / size);
         ModelAndView mav = new ModelAndView("ticket-list");
         mav.addObject("tickets", tickets);
+        mav.addObject("currentPage", page);
+        mav.addObject("pageSize", size);
+        mav.addObject("totalPages", totalPages);
+        mav.addObject("totalCount", totalCount);
         return mav;
     }
 

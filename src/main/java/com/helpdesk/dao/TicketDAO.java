@@ -106,6 +106,33 @@ public class TicketDAO {
             .list();
     }
 
+    /**
+     * Returns a page of tickets ordered by creation date descending.
+     * Uses zero‑based page index.
+     */
+    @Transactional(readOnly = true)
+    public List<Ticket> findPage(int page, int size) {
+        return sessionFactory
+            .getCurrentSession()
+            .createQuery(
+                "SELECT t FROM Ticket t JOIN FETCH t.createdBy ORDER BY t.createdAt DESC",
+                Ticket.class)
+            .setFirstResult(page * size)
+            .setMaxResults(size)
+            .list();
+    }
+
+    /**
+     * Count total tickets (no filter).
+     */
+    @Transactional(readOnly = true)
+    public long countAll() {
+        return sessionFactory
+            .getCurrentSession()
+            .createQuery("SELECT COUNT(t) FROM Ticket t", Long.class)
+            .uniqueResult();
+    }
+
     @Transactional(readOnly = true)
     public List<Ticket> findByStatus(TicketStatus status) {
         return sessionFactory

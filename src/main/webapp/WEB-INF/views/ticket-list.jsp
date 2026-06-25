@@ -97,6 +97,26 @@
                             </c:forEach>
                         </tbody>
                     </table>
+<div class="d-flex justify-content-between align-items-center mt-3">
+    <div>
+        Showing ${pageSize} of ${totalCount} tickets
+    </div>
+    <nav aria-label="Page navigation">
+        <ul class="pagination mb-0">
+            <li class="page-item ${currentPage == 0 ? 'disabled' : ''}">
+                <a class="page-link" href="?page=${currentPage-1}&size=${pageSize}">Previous</a>
+            </li>
+            <c:forEach var="i" begin="0" end="${totalPages-1}">
+                <li class="page-item ${i == currentPage ? 'active' : ''}">
+                    <a class="page-link" href="?page=${i}&size=${pageSize}">${i+1}</a>
+                </li>
+            </c:forEach>
+            <li class="page-item ${currentPage+1 >= totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="?page=${currentPage+1}&size=${pageSize}">Next</a>
+            </li>
+        </ul>
+    </nav>
+</div>
                 </c:otherwise>
             </c:choose>
         </div>

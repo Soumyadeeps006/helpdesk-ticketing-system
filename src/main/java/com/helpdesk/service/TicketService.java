@@ -46,6 +46,17 @@ public class TicketService {
         return ticketDAO.findAll();
     }
 
+    // Pagination support
+    @Transactional(readOnly = true)
+    public List<Ticket> getTicketsPage(int page, int size) {
+        return ticketDAO.findPage(page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public long getTicketCount() {
+        return ticketDAO.countAll();
+    }
+
     @Transactional(readOnly = true)
     public Ticket getTicketById(Long id) {
         return ticketDAO
