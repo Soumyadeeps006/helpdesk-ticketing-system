@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: helpdesk-ticketing-system
+
+  # Database Configuration (PostgreSQL)
+  datasource:
+    url: jdbc:postgresql://localhost:5432/helpdesk_db
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  # JPA / Hibernate Configuration
+  jpa:
+    hibernate:
+      ddl-auto: update # Use 'validate' or 'none' in production
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        # Force Hibernate to use UTC for timestamps
+        jdbc:
+          time_zone: UTC
+
+  # Jackson (JSON) Configuration
+  jackson:
+    time-zone: UTC
+    serialization:
+      write-dates-as-timestamps: false
+
+  # RabbitMQ Configuration
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+# Custom Application Properties
+app:
+  file:
+    upload-dir: ./uploads

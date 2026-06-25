@@ -1,5 +1,6 @@
 package com.helpdesk.service;
 
+import com.helpdesk.config.RabbitConfig;
 import com.helpdesk.dao.TicketDAO;
 import com.helpdesk.dao.UserDAO;
 import com.helpdesk.enums.Priority;
@@ -10,9 +11,12 @@ import com.helpdesk.model.User;
 import java.util.List;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * TicketService is the ONLY place allowed to mutate ticket state.
@@ -25,16 +29,19 @@ public class TicketService {
     private final TicketDAO ticketDAO;
     private final UserDAO userDAO;
     private final SessionFactory sessionFactory;
+    private final RabbitTemplate rabbitTemplate; // ADDED FOR RABBITMQ
 
     @Autowired
     public TicketService(
         TicketDAO ticketDAO,
         UserDAO userDAO,
-        SessionFactory sessionFactory
+        SessionFactory sessionFactory,
+        RabbitTemplate rabbitTemplate // ADDED FOR RABBITMQ
     ) {
         this.ticketDAO = ticketDAO;
         this.userDAO = userDAO;
         this.sessionFactory = sessionFactory;
+        this.rabbitTemplate = rabbitTemplate; // ADDED FOR RABBITMQ
     }
 
     // -----------------------------------------------------------------------
@@ -46,7 +53,6 @@ public class TicketService {
         return ticketDAO.findAll();
     }
 
-    // Pagination support
     @Transactional(readOnly = true)
     public List<Ticket> getTicketsPage(int page, int size) {
         return ticketDAO.findPage(page, size);
@@ -84,13 +90,14 @@ public class TicketService {
                 )
             );
 
-        // Ticket(title, description, priority, createdBy) constructor — from Ticket.java
         Ticket ticket = new Ticket(title, description, priority, reporter);
         ticket.setStatus(TicketStatus.OPEN);
 
         ticketDAO.save(ticket);
 
-        // AuditLog is immutable — use constructor, not setters
+        // ADDED: Publish async event after DB commit
+        publishTicketEvent(ticket.getId(), "CREATED");
+
         appendAudit(
             ticket,
             reporter,
@@ -118,10 +125,13 @@ public class TicketService {
                 )
             );
 
-        // Use the domain method — sets assignedTo + status in one call
         ticket.assignTo(assignee);
 
         ticketDAO.save(ticket);
+        
+        // ADDED: Publish async event after DB commit
+        publishTicketEvent(ticket.getId(), "IN_PROGRESS");
+
         appendAudit(ticket, assignee, "STATUS_CHANGE", "OPEN", "IN_PROGRESS");
 
         return ticket;
@@ -139,10 +149,13 @@ public class TicketService {
                 )
             );
 
-        // Use the domain method — sets status + resolvedAt
         ticket.close();
 
         ticketDAO.save(ticket);
+        
+        // ADDED: Publish async event after DB commit
+        publishTicketEvent(ticket.getId(), "CLOSED");
+
         appendAudit(ticket, closedBy, "STATUS_CHANGE", "IN_PROGRESS", "CLOSED");
 
         return ticket;
@@ -177,6 +190,10 @@ public class TicketService {
         ticket.setPriority(newPriority);
 
         ticketDAO.save(ticket);
+        
+        // ADDED: Publish async event after DB commit
+        publishTicketEvent(ticket.getId(), "PRIORITY_CHANGED");
+
         appendAudit(
             ticket,
             updatedBy,
@@ -217,9 +234,31 @@ public class TicketService {
         String oldValue,
         String newValue
     ) {
-        // AuditLog has no setters — use the (ticket, actor, action, oldValue, newValue) constructor
         AuditLog log = new AuditLog(ticket, actor, action, oldValue, newValue);
         Session session = sessionFactory.getCurrentSession();
         session.save(log);
+    }
+
+    // -----------------------------------------------------------------------
+    // ADDED: RabbitMQ Event Publisher
+    // -----------------------------------------------------------------------
+    
+    /**
+     * Safely publishes a message to RabbitMQ ONLY after the database transaction 
+     * has successfully committed. This prevents sending notifications for rolled-back transactions.
+     */
+    private void publishTicketEvent(Long ticketId, String eventType) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    String routingKey = "ticket.event." + eventType.toLowerCase();
+                    rabbitTemplate.convertAndSend(RabbitConfig.TICKET_EXCHANGE, routingKey, ticketId);
+                } catch (Exception e) {
+                    // Log the error, but don't fail the main transaction if RabbitMQ is down
+                    System.err.println("Failed to publish RabbitMQ event for ticket " + ticketId + ": " + e.getMessage());
+                }
+            }
+        });
     }
 }
